@@ -76,35 +76,35 @@ jobs:
           echo "--- 编译 Linux x86_64 ---"
           lazbuild --cpu=x86_64 --os=linux src/pascalcoin_daemon.lpi
           lazbuild --cpu=x86_64 --os=linux src/pascalcoin_wallet_classic.lpi
-          cp src/PascalCoinDaemonLazarus output/linux_x64/
+          cp src/pascalcoin_daemon output/linux_x64/
           cp src/PascalCoinWalletLazarus output/linux_x64/
           
           # 编译 Windows x86_64
           echo "--- 编译 Windows x86_64 ---"
           lazbuild --cpu=x86_64 --os=win64 src/pascalcoin_daemon.lpi
           lazbuild --cpu=x86_64 --os=win64 src/pascalcoin_wallet_classic.lpi
-          cp src/PascalCoinDaemonLazarus.exe output/win_x64/
+          cp src/pascalcoin_daemon.exe output/win_x64/
           cp src/PascalCoinWalletLazarus.exe output/win_x64/
           
           # 编译 Windows i386
           echo "--- 编译 Windows i386 ---"
           lazbuild --cpu=i386 --os=win32 src/pascalcoin_daemon.lpi
           lazbuild --cpu=i386 --os=win32 src/pascalcoin_wallet_classic.lpi
-          cp src/PascalCoinDaemonLazarus.exe output/win_x86/
+          cp src/pascalcoin_daemon.exe output/win_x86/
           cp src/PascalCoinWalletLazarus.exe output/win_x86/
           
           # 编译 Linux ARM 32位
           echo "--- 编译 Linux ARM 32位 ---"
           lazbuild --cpu=arm --os=linux src/pascalcoin_daemon.lpi
           lazbuild --cpu=arm --os=linux src/pascalcoin_wallet_classic.lpi
-          cp src/PascalCoinDaemonLazarus output/linux_arm/
+          cp src/pascalcoin_daemon output/linux_arm/
           cp src/PascalCoinWalletLazarus output/linux_arm/
           
           # 编译 Linux ARM 64位
           echo "--- 编译 Linux ARM 64位 ---"
           lazbuild --cpu=aarch64 --os=linux src/pascalcoin_daemon.lpi
           lazbuild --cpu=aarch64 --os=linux src/pascalcoin_wallet_classic.lpi
-          cp src/PascalCoinDaemonLazarus output/linux_arm64/
+          cp src/pascalcoin_daemon output/linux_arm64/
           cp src/PascalCoinWalletLazarus output/linux_arm64/
       - name: 打包所有平台产物
         run: |
