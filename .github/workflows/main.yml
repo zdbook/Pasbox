@@ -55,11 +55,11 @@ jobs:
           sudo ln -sf /usr/lib/fpc/$FPC_VER/ppcross386 /usr/bin/ppcross386
           
           # Linux ARM 32位交叉编译器
-          sudo make crossinstall CPU_TARGET=arm OS_TARGET=linux INSTALL_PREFIX=/usr
+          sudo make crossinstall CPU_TARGET=arm OS_TARGET=linux INSTALL_PREFIX=/usr BINUTILSPREFIX=arm-linux-gnueabihf-
           sudo ln -sf /usr/lib/fpc/$FPC_VER/ppcrossarm /usr/bin/ppcrossarm
           
           # Linux ARM 64位交叉编译器
-          sudo make crossinstall CPU_TARGET=aarch64 OS_TARGET=linux INSTALL_PREFIX=/usr
+          sudo make crossinstall CPU_TARGET=aarch64 OS_TARGET=linux INSTALL_PREFIX=/usr BINUTILSPREFIX=aarch64-linux-gnu-
           sudo ln -sf /usr/lib/fpc/$FPC_VER/ppcrossa64 /usr/bin/ppcrossa64
       - name: 自动获取依赖库 (带容错机制)
         run: |
