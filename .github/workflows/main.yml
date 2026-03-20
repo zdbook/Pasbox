@@ -9,7 +9,8 @@ on:
 env:
   REPO_NAME: ${{ github.repository }}
   WORKSPACE: ${{ github.workspace }}
-  DEPENDENCY_MAIN: "https://github.com/zdbook/Pasbox-Deps.git"
+  # 为GitHub依赖地址自动添加Token，解决克隆认证问题
+  DEPENDENCY_MAIN: "https://${{ secrets.GITHUB_TOKEN }}@github.com/zdbook/Pasbox-Deps.git"
   DEPENDENCY_BACKUP1: "https://gitee.com/zdbook/Pasbox-Deps.git"
   DEPENDENCY_BACKUP2: "https://gitlab.com/zdbook/Pasbox-Deps.git"
 jobs:
