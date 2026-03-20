@@ -37,6 +37,18 @@ jobs:
           sudo apt-get install -y binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
           # 安装多架构binutils支持
           sudo apt-get install -y binutils-multiarch
+          
+          # 为ARM32交叉编译创建软链接，解决FPC找不到arm-linux-ld的问题
+          sudo ln -sf /usr/bin/arm-linux-gnueabihf-ld /usr/bin/arm-linux-ld
+          sudo ln -sf /usr/bin/arm-linux-gnueabihf-as /usr/bin/arm-linux-as
+          sudo ln -sf /usr/bin/arm-linux-gnueabihf-ar /usr/bin/arm-linux-ar
+          sudo ln -sf /usr/bin/arm-linux-gnueabihf-strip /usr/bin/arm-linux-strip
+          
+          # 为ARM64交叉编译创建软链接，解决FPC找不到aarch64-linux-ld的问题
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-ld /usr/bin/aarch64-linux-ld
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-as /usr/bin/aarch64-linux-as
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-ar /usr/bin/aarch64-linux-ar
+          sudo ln -sf /usr/bin/aarch64-linux-gnu-strip /usr/bin/aarch64-linux-strip
       - name: 配置 FPC 交叉编译器
         run: |
           # 获取当前FPC版本
