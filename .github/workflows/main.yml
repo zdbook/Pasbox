@@ -23,7 +23,7 @@ jobs:
         with:
           submodules: recursive
       - name: 安装 Lazarus 和 FPC
-        uses: gcarreno/setup-lazarus@v4.0.0
+        uses: gcarreno/setup-lazarus@v3.2.17
         with:
           lazarus-version: stable
           with-cache: false
