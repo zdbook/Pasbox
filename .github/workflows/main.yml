@@ -64,19 +64,23 @@ jobs:
       - name: 自动获取依赖库 (带容错机制)
         run: |
           echo "正在尝试从主地址获取依赖..."
-          # 移除GitHub Actions自动添加的全局url替换配置，避免所有https地址都被强制加上Token
-          # 忽略unset的错误，避免配置不存在时导致步骤失败
-          git config --global --unset url."https://".insteadOf || true
-          git config --global --unset url."https://github.com/".insteadOf || true
-          if git clone $DEPENDENCY_MAIN deps; then
+          # 改用下载Zip包的方式，彻底绕开git的凭证配置问题
+          if wget -O deps.zip $DEPENDENCY_MAIN/archive/refs/heads/master.zip; then
             echo "成功从主地址获取依赖。"
-          elif git clone $DEPENDENCY_BACKUP1 deps; then
+            unzip -q deps.zip
+            mv Pasbox-Deps-master deps
+          elif wget -O deps.zip $DEPENDENCY_BACKUP1/archive/master.zip; then
             echo "主地址失败，成功从备用地址1获取依赖。"
-          elif git clone $DEPENDENCY_BACKUP2 deps; then
+            unzip -q deps.zip
+            mv Pasbox-Deps-master deps
+          elif wget -O deps.zip $DEPENDENCY_BACKUP2/-/archive/master/Pasbox-Deps-master.zip; then
             echo "备用地址1失败，成功从备用地址2获取依赖。"
+            unzip -q deps.zip
+            mv Pasbox-Deps-master deps
           else
             echo "所有地址均失败，请检查网络或仓库地址！" && exit 1
           fi
+          rm -f deps.zip
           echo "PPC_CONFIG_PATH=$GITHUB_WORKSPACE/deps" >> $GITHUB_ENV
       - name: 执行多平台交叉编译
         run: |
