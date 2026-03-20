@@ -1,227 +1,219 @@
-name: PascalCoin Build & Release
+name: 全自动交叉编译并发布 Pasbox
+
+# 触发条件：打标签时触发 / PR 时仅编译不发布 / 手动触发
 on:
   push:
-    branches: [ main, master ]
-    tags: [ 'v*.*.*' ]
+    tags:
+      - 'v*'  # 标签以v开头时触发（如v1.0.0）
   pull_request:
-    branches: [ main, master ]
+    branches: [ master, main ]
+  workflow_dispatch:  # 手动触发
 
-permissions:
-  contents: write
-  packages: write
+# 全局环境变量（自动匹配仓库路径，无需手动修改）
+env:
+  REPO_NAME: ${{ github.repository }}
+  REPO_OWNER: ${{ github.repository_owner }}
+  WORKSPACE: ${{ github.workspace }}
+  # 依赖库主地址 + 备用地址（优先级降级）
+  DEPENDENCY_MAIN: "https://github.com/zdbook/Pasbox-Deps.git"
+  DEPENDENCY_BACKUP1: "https://gitee.com/zdbook/Pasbox-Deps.git"
+  DEPENDENCY_BACKUP2: "https://gitlab.com/zdbook/Pasbox-Deps.git"
 
 jobs:
+  # 构建矩阵：多平台交叉编译
   build:
-    name: Build ${{ matrix.suffix }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }}-${{ matrix.arch }} 编译
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      fail-fast: false  # 一个平台失败不影响其他平台
       matrix:
+        # 支持的编译平台和架构
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [x86_64, i386]
+        exclude:
+          - os: macos-latest
+            arch: i386  # macOS 不再支持32位
         include:
-          # -------------------------- Linux 平台 --------------------------
-          - target-os: Linux
-            target-cpu: x86_64
-            widgetset: gtk2
-            network: mainnet
-            suffix: linux-x86_64-mainnet
-          - target-os: Linux
-            target-cpu: x86_64
-            widgetset: gtk2
-            network: testnet
-            suffix: linux-x86_64-testnet
-            defines: TESTNET
-          - target-os: Linux
-            target-cpu: aarch64
-            widgetset: gtk2
-            network: mainnet
-            suffix: linux-aarch64-mainnet
-
-          # -------------------------- Windows 平台 --------------------------
-          - target-os: Win64
-            target-cpu: x86_64
-            widgetset: win32
-            network: mainnet
-            suffix: windows-x86_64-mainnet
-          - target-os: Win64
-            target-cpu: x86_64
-            widgetset: win32
-            network: testnet
-            suffix: windows-x86_64-testnet
-            defines: TESTNET
-          - target-os: Win32
-            target-cpu: i386
-            widgetset: win32
-            network: mainnet
-            suffix: windows-i386-mainnet
-
-          # -------------------------- macOS 平台 --------------------------
-          - target-os: Darwin
-            target-cpu: x86_64
-            widgetset: cocoa
-            network: mainnet
-            suffix: macos-x86_64-mainnet
-          - target-os: Darwin
-            target-cpu: aarch64
-            widgetset: cocoa
-            network: mainnet
-            suffix: macos-arm64-mainnet
+          - os: ubuntu-latest
+            fpc_arch: x86_64-linux
+            output_suffix: linux-${{ matrix.arch }}
+          - os: windows-latest
+            fpc_arch: x86_64-win64
+            output_suffix: windows-${{ matrix.arch }}.exe
+          - os: macos-latest
+            fpc_arch: x86_64-darwin
+            output_suffix: macos-${{ matrix.arch }}
 
     steps:
-      - name: 检出代码
+      # 步骤1：拉取代码（自动匹配仓库路径）
+      - name: 拉取仓库代码
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # 拉取完整历史，避免编译时缺失版本信息
+          path: ./pasbox
+        id: checkout
+        continue-on-error: false
+        timeout-minutes: 5
 
-      - name: 安装 Lazarus/FPC 编译环境与交叉工具链
+      # 步骤2：错误处理 - 检查代码拉取结果
+      - name: 校验代码拉取状态
+        if: steps.checkout.outcome != 'success'
         run: |
-          # 添加 Lazarus 官方 PPA（获取最新稳定版，兼容新代码）
-          sudo add-apt-repository ppa:lazarus-team/ppa -y
+          echo "❌ 错误：拉取仓库代码失败！仓库路径：${{ env.REPO_NAME }}"
+          echo "🔍 排查建议：检查仓库地址是否正确，网络是否通畅"
+          exit 1
+
+      # 步骤3：安装编译环境（Lazarus/FPC）
+      - name: 安装 FPC/Lazarus 编译环境
+        uses: joonro/setup-lazarus@v3.0.0
+        with:
+          lazarus-version: 'latest'  # 使用最新稳定版
+          fpc-version: 'latest'
+        id: install_compiler
+        continue-on-error: true
+
+      # 步骤4：降级安装（主版本失败时）
+      - name: 降级安装 FPC/Lazarus（备用版本）
+        if: steps.install_compiler.outcome != 'success'
+        uses: joonro/setup-lazarus@v3.0.0
+        with:
+          lazarus-version: '2.2.6'
+          fpc-version: '3.2.2'
+        id: install_compiler_fallback
+        continue-on-error: false
+
+      # 步骤5：自动下载依赖库（主地址失败则切换备用）
+      - name: 下载依赖库（主地址）
+        run: |
+          echo "📥 尝试从主地址下载依赖：${{ env.DEPENDENCY_MAIN }}"
+          git clone ${{ env.DEPENDENCY_MAIN }} ${{ env.WORKSPACE }}/pasbox/deps
+        id: deps_main
+        continue-on-error: true
+
+      - name: 切换备用地址1下载依赖
+        if: steps.deps_main.outcome != 'success'
+        run: |
+          echo "⚠️ 主地址失败，切换到备用地址1：${{ env.DEPENDENCY_BACKUP1 }}"
+          git clone ${{ env.DEPENDENCY_BACKUP1 }} ${{ env.WORKSPACE }}/pasbox/deps
+        id: deps_backup1
+        continue-on-error: true
+
+      - name: 切换备用地址2下载依赖
+        if: steps.deps_backup1.outcome != 'success'
+        run: |
+          echo "⚠️ 备用地址1失败，切换到备用地址2：${{ env.DEPENDENCY_BACKUP2 }}"
+          git clone ${{ env.DEPENDENCY_BACKUP2 }} ${{ env.WORKSPACE }}/pasbox/deps
+        id: deps_backup2
+        continue-on-error: false
+
+      # 步骤6：依赖下载错误处理
+      - name: 校验依赖下载状态
+        if: steps.deps_backup2.outcome != 'success'
+        run: |
+          echo "❌ 错误：所有依赖库地址均无法访问！"
+          echo "📋 尝试过的地址："
+          echo "  1. ${{ env.DEPENDENCY_MAIN }}"
+          echo "  2. ${{ env.DEPENDENCY_BACKUP1 }}"
+          echo "  3. ${{ env.DEPENDENCY_BACKUP2 }}"
+          echo "🔍 排查建议：检查依赖库地址是否有效，或新增备用地址"
+          exit 1
+
+      # 步骤7：配置交叉编译环境（Linux/macOS 额外处理）
+      - name: 配置 Linux 交叉编译依赖
+        if: matrix.os == 'ubuntu-latest'
+        run: |
           sudo apt update
-          # 安装核心编译工具
-          sudo apt install -y fpc fpc-src lazarus lcl libplist-utils
-          # 安装全平台交叉编译器
-          sudo apt install -y \
-            fpc-cross-win32 fpc-cross-win64 \
-            fpc-cross-i386-linux fpc-cross-aarch64-linux \
-            fpc-cross-x86_64-darwin fpc-cross-aarch64-darwin
-          # 验证安装
-          echo "FPC 版本：$(fpc -iV)"
-          echo "LazBuild 版本：$(lazbuild --version)"
+          sudo apt install -y libgtk2.0-dev libqt5pas-dev binutils-mingw-w64 gcc-mingw-w64
+          # 修复32位编译依赖
+          if [ "${{ matrix.arch }}" = "i386" ]; then
+            sudo apt install -y gcc-multilib g++-multilib lib32z1-dev
+          fi
+        timeout-minutes: 10
 
-      - name: 配置编译变量
-        id: vars
+      - name: 配置 macOS 交叉编译依赖
+        if: matrix.os == 'macos-latest'
         run: |
-          # ========== 请根据你的项目实际情况修改此处 ==========
-          # 主项目 .lpi 文件路径（Lazarus 项目文件）
-          echo "PROJECT_FILE=src/PascalCoin.lpi" >> $GITHUB_ENV
-          # 输出的可执行文件名称（和项目里的输出名称一致）
-          echo "BINARY_NAME=PascalCoin" >> $GITHUB_ENV
-          # ====================================================
+          brew install gtk+2 qt5
+          brew link --force qt5
+        timeout-minutes: 10
 
-          # 版本号处理：tag 取版本号，否则取 commit 短哈希
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/v}
+      # 步骤8：编译项目（核心步骤，带详细错误输出）
+      - name: 编译 Pasbox 项目
+        working-directory: ${{ env.WORKSPACE }}/pasbox
+        run: |
+          echo "🚀 开始编译：${{ matrix.os }}-${{ matrix.arch }}"
+          echo "📂 工作目录：$(pwd)"
+          # 编译命令（Lazarus 命令行编译）
+          lazbuild --verbose --cpu=${{ matrix.arch }} --os=${{ matrix.fpc_arch }} pasbox.lpi
+          # 检查编译产物是否存在
+          if [ -f "pasbox${{ matrix.output_suffix }}" ]; then
+            echo "✅ 编译成功！产物路径：$(pwd)/pasbox${{ matrix.output_suffix }}"
+            # 重命名产物（带版本信息）
+            mv pasbox${{ matrix.output_suffix }} pasbox-${{ github.ref_name }}-${{ matrix.output_suffix }}
           else
-            VERSION=$(git rev-parse --short HEAD)
+            echo "❌ 编译失败！未生成目标文件"
+            echo "📋 编译日志："
+            cat lazbuild.log || echo "无编译日志"
+            exit 1
           fi
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "OUTPUT_DIR=build/output/${{ matrix.suffix }}" >> $GITHUB_ENV
+        timeout-minutes: 15
+        env:
+          # 强制输出详细错误
+          FPC_DEBUG: 1
+          LAZARUS_DEBUG: 1
 
-          # 编译定义：RELEASE 固定，追加 TESTNET 等自定义定义
-          DEFINES="RELEASE"
-          if [[ -n "${{ matrix.defines }}" ]]; then
-            DEFINES="$DEFINES,${{ matrix.defines }}"
-          fi
-          echo "DEFINES=$DEFINES" >> $GITHUB_ENV
-
-      - name: 创建输出目录
-        run: mkdir -p ${{ env.OUTPUT_DIR }}
-
-      - name: 编译项目（LazBuild）
-        run: |
-          lazbuild --verbose \
-            --os=${{ matrix.target-os }} \
-            --cpu=${{ matrix.target-cpu }} \
-            --widgetset=${{ matrix.widgetset }} \
-            --build-mode=Release \
-            --define=${{ env.DEFINES }} \
-            --out-dir=${{ env.OUTPUT_DIR }} \
-            ${{ env.PROJECT_FILE }}
-
-      - name: 打包 Windows 产物
-        if: startsWith(matrix.target-os, 'Win')
-        run: |
-          # 复制 Windows 依赖 DLL
-          cp -r windows-dll/* ${{ env.OUTPUT_DIR }}/
-          # 复制文档与许可证
-          cp README.md LICENSE CHANGELOG.md ${{ env.OUTPUT_DIR }}/
-          # 生成 ZIP 分发包
-          cd build/output
-          zip -r PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.zip ${{ matrix.suffix }}/
-
-      - name: 打包 Linux 产物
-        if: matrix.target-os == 'Linux'
-        run: |
-          # 复制 Linux 依赖 so 库
-          cp -r linux-libs/* ${{ env.OUTPUT_DIR }}/
-          # 给可执行文件添加执行权限
-          chmod +x ${{ env.OUTPUT_DIR }}/${{ env.BINARY_NAME }}
-          # 复制文档与许可证
-          cp README.md LICENSE CHANGELOG.md ${{ env.OUTPUT_DIR }}/
-          # 生成 tar.gz 分发包
-          cd build/output
-          tar -czf PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.tar.gz ${{ matrix.suffix }}/
-
-      - name: 打包 macOS 产物（生成 .app  bundle）
-        if: matrix.target-os == 'Darwin'
-        run: |
-          APP_NAME="PascalCoin"
-          APP_DIR="${{ env.OUTPUT_DIR }}/${APP_NAME}.app"
-          
-          # 复制仓库自带的 macOS app 模板
-          cp -r build/macos/AppBundleTemplate $APP_DIR
-          # 创建可执行文件目录
-          mkdir -p $APP_DIR/Contents/MacOS
-          
-          # 复制编译好的二进制文件到 app 包
-          cp ${{ env.OUTPUT_DIR }}/${{ env.BINARY_NAME }} $APP_DIR/Contents/MacOS/
-          chmod +x $APP_DIR/Contents/MacOS/${{ env.BINARY_NAME }}
-          
-          # 更新 Info.plist 中的版本号和可执行文件名
-          sed -i "s/\$(VERSION)/${{ env.VERSION }}/g" $APP_DIR/Contents/Info.plist
-          sed -i "s/\$(EXECUTABLE_NAME)/${{ env.BINARY_NAME }}/g" $APP_DIR/Contents/Info.plist
-          
-          # 复制文档与许可证
-          cp README.md LICENSE CHANGELOG.md ${{ env.OUTPUT_DIR }}/
-          # 生成 ZIP 分发包
-          cd build/output
-          zip -r PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.zip ${{ matrix.suffix }}/
-
-      - name: 上传构建产物到 Actions
+      # 步骤9：上传编译产物（作为临时工件）
+      - name: 上传编译产物
         uses: actions/upload-artifact@v4
         with:
-          name: PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}
-          path: build/output/PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.*
-          retention-days: 30
+          name: pasbox-${{ github.ref_name }}-${{ matrix.output_suffix }}
+          path: ${{ env.WORKSPACE }}/pasbox/pasbox-${{ github.ref_name }}-${{ matrix.output_suffix }}
+          retention-days: 7  # 临时工件保留7天
 
-  # 发布到 GitHub Release（仅推送 tag 时执行）
+  # 发布步骤：仅在打标签时执行，合并所有平台产物
   release:
-    name: Publish Release
-    needs: build
+    needs: build  # 依赖build任务完成
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: 发布到 GitHub Release
     steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 下载所有构建产物
+      # 步骤1：下载所有平台的编译产物
+      - name: 下载所有编译产物
         uses: actions/download-artifact@v4
         with:
-          path: ./artifacts
+          path: ${{ github.workspace }}/release
 
-      - name: 生成发布日志
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "RELEASE_VERSION=$VERSION" >> $GITHUB_ENV
-          
-          # 从 CHANGELOG.md 提取对应版本的更新日志
-          if grep -q "## $VERSION" CHANGELOG.md; then
-            awk '/^## '"$VERSION"'/{flag=1; next} /^## /{flag=0} flag' CHANGELOG.md > release_notes.md
-          else
-            echo "## PascalCoin Release v$VERSION" > release_notes.md
-            echo "" >> release_notes.md
-            echo "### 完整更新日志" >> release_notes.md
-            echo "https://github.com/${{ github.repository }}/commits/v$VERSION" >> release_notes.md
-          fi
-
-      - name: 创建 GitHub Release 并上传所有产物
+      # 步骤2：创建GitHub Release并上传产物
+      - name: 创建并发布 Release
         uses: softprops/action-gh-release@v2
         with:
-          name: PascalCoin v${{ env.RELEASE_VERSION }}
-          body_path: release_notes.md
-          files: ./artifacts/**/*.zip ./artifacts/**/*.tar.gz
+          name: Pasbox ${{ github.ref_name }}
+          body: |
+            ## 🚀 Pasbox 自动编译发布
+            - 编译时间：${{ github.run_at }}
+            - 仓库地址：${{ env.REPO_NAME }}
+            - 编译平台：Linux/Windows/macOS
+            - 架构：x86_64/i386（macOS仅x86_64）
+            
+            ## 🚨 错误排查
+            如果运行失败，请检查：
+            1. 依赖库是否完整（脚本已自动切换备用地址）
+            2. 系统架构是否匹配（32/64位）
+            3. 查看Actions日志获取详细错误
+          files: |
+            ${{ github.workspace }}/release/**/*
           draft: false
           prerelease: false
-          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动生成的令牌
+
+      # 步骤3：发布失败通知（可选，可扩展为邮件/钉钉等）
+      - name: 发布失败告警
+        if: failure()
+        run: |
+          echo "❌ Release发布失败！"
+          echo "📋 失败信息："
+          echo "  仓库：${{ env.REPO_NAME }}"
+          echo "  标签：${{ github.ref_name }}"
+          echo "  运行ID：${{ github.run_id }}"
+          echo "🔍 排查建议：检查GITHUB_TOKEN权限，或产物是否存在"
