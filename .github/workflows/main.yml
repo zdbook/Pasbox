@@ -155,8 +155,13 @@ jobs:
           "WORKDIR /workspace" \
           > Dockerfile
           
+          # 配置Docker禁用IPv6，解决GitHub Actions的IPv6网络不可达问题
+          echo '{ "ipv6": false }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          sleep 5
+          
           # 构建Docker镜像
-          docker build -t pasbox-build-env:latest .
+          docker build --network=host -t pasbox-build-env:latest .
           # 打包Docker镜像为tar.gz文件，方便下载
           docker save pasbox-build-env:latest | gzip > pasbox-build-env.tar.gz
           
