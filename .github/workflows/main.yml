@@ -1,0 +1,227 @@
+name: PascalCoin Build & Release
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.suffix }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # -------------------------- Linux 平台 --------------------------
+          - target-os: Linux
+            target-cpu: x86_64
+            widgetset: gtk2
+            network: mainnet
+            suffix: linux-x86_64-mainnet
+          - target-os: Linux
+            target-cpu: x86_64
+            widgetset: gtk2
+            network: testnet
+            suffix: linux-x86_64-testnet
+            defines: TESTNET
+          - target-os: Linux
+            target-cpu: aarch64
+            widgetset: gtk2
+            network: mainnet
+            suffix: linux-aarch64-mainnet
+
+          # -------------------------- Windows 平台 --------------------------
+          - target-os: Win64
+            target-cpu: x86_64
+            widgetset: win32
+            network: mainnet
+            suffix: windows-x86_64-mainnet
+          - target-os: Win64
+            target-cpu: x86_64
+            widgetset: win32
+            network: testnet
+            suffix: windows-x86_64-testnet
+            defines: TESTNET
+          - target-os: Win32
+            target-cpu: i386
+            widgetset: win32
+            network: mainnet
+            suffix: windows-i386-mainnet
+
+          # -------------------------- macOS 平台 --------------------------
+          - target-os: Darwin
+            target-cpu: x86_64
+            widgetset: cocoa
+            network: mainnet
+            suffix: macos-x86_64-mainnet
+          - target-os: Darwin
+            target-cpu: aarch64
+            widgetset: cocoa
+            network: mainnet
+            suffix: macos-arm64-mainnet
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 Lazarus/FPC 编译环境与交叉工具链
+        run: |
+          # 添加 Lazarus 官方 PPA（获取最新稳定版，兼容新代码）
+          sudo add-apt-repository ppa:lazarus-team/ppa -y
+          sudo apt update
+          # 安装核心编译工具
+          sudo apt install -y fpc fpc-src lazarus lcl libplist-utils
+          # 安装全平台交叉编译器
+          sudo apt install -y \
+            fpc-cross-win32 fpc-cross-win64 \
+            fpc-cross-i386-linux fpc-cross-aarch64-linux \
+            fpc-cross-x86_64-darwin fpc-cross-aarch64-darwin
+          # 验证安装
+          echo "FPC 版本：$(fpc -iV)"
+          echo "LazBuild 版本：$(lazbuild --version)"
+
+      - name: 配置编译变量
+        id: vars
+        run: |
+          # ========== 请根据你的项目实际情况修改此处 ==========
+          # 主项目 .lpi 文件路径（Lazarus 项目文件）
+          echo "PROJECT_FILE=src/PascalCoin.lpi" >> $GITHUB_ENV
+          # 输出的可执行文件名称（和项目里的输出名称一致）
+          echo "BINARY_NAME=PascalCoin" >> $GITHUB_ENV
+          # ====================================================
+
+          # 版本号处理：tag 取版本号，否则取 commit 短哈希
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(git rev-parse --short HEAD)
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "OUTPUT_DIR=build/output/${{ matrix.suffix }}" >> $GITHUB_ENV
+
+          # 编译定义：RELEASE 固定，追加 TESTNET 等自定义定义
+          DEFINES="RELEASE"
+          if [[ -n "${{ matrix.defines }}" ]]; then
+            DEFINES="$DEFINES,${{ matrix.defines }}"
+          fi
+          echo "DEFINES=$DEFINES" >> $GITHUB_ENV
+
+      - name: 创建输出目录
+        run: mkdir -p ${{ env.OUTPUT_DIR }}
+
+      - name: 编译项目（LazBuild）
+        run: |
+          lazbuild --verbose \
+            --os=${{ matrix.target-os }} \
+            --cpu=${{ matrix.target-cpu }} \
+            --widgetset=${{ matrix.widgetset }} \
+            --build-mode=Release \
+            --define=${{ env.DEFINES }} \
+            --out-dir=${{ env.OUTPUT_DIR }} \
+            ${{ env.PROJECT_FILE }}
+
+      - name: 打包 Windows 产物
+        if: startsWith(matrix.target-os, 'Win')
+        run: |
+          # 复制 Windows 依赖 DLL
+          cp -r windows-dll/* ${{ env.OUTPUT_DIR }}/
+          # 复制文档与许可证
+          cp README.md LICENSE CHANGELOG.md ${{ env.OUTPUT_DIR }}/
+          # 生成 ZIP 分发包
+          cd build/output
+          zip -r PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.zip ${{ matrix.suffix }}/
+
+      - name: 打包 Linux 产物
+        if: matrix.target-os == 'Linux'
+        run: |
+          # 复制 Linux 依赖 so 库
+          cp -r linux-libs/* ${{ env.OUTPUT_DIR }}/
+          # 给可执行文件添加执行权限
+          chmod +x ${{ env.OUTPUT_DIR }}/${{ env.BINARY_NAME }}
+          # 复制文档与许可证
+          cp README.md LICENSE CHANGELOG.md ${{ env.OUTPUT_DIR }}/
+          # 生成 tar.gz 分发包
+          cd build/output
+          tar -czf PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.tar.gz ${{ matrix.suffix }}/
+
+      - name: 打包 macOS 产物（生成 .app  bundle）
+        if: matrix.target-os == 'Darwin'
+        run: |
+          APP_NAME="PascalCoin"
+          APP_DIR="${{ env.OUTPUT_DIR }}/${APP_NAME}.app"
+          
+          # 复制仓库自带的 macOS app 模板
+          cp -r build/macos/AppBundleTemplate $APP_DIR
+          # 创建可执行文件目录
+          mkdir -p $APP_DIR/Contents/MacOS
+          
+          # 复制编译好的二进制文件到 app 包
+          cp ${{ env.OUTPUT_DIR }}/${{ env.BINARY_NAME }} $APP_DIR/Contents/MacOS/
+          chmod +x $APP_DIR/Contents/MacOS/${{ env.BINARY_NAME }}
+          
+          # 更新 Info.plist 中的版本号和可执行文件名
+          sed -i "s/\$(VERSION)/${{ env.VERSION }}/g" $APP_DIR/Contents/Info.plist
+          sed -i "s/\$(EXECUTABLE_NAME)/${{ env.BINARY_NAME }}/g" $APP_DIR/Contents/Info.plist
+          
+          # 复制文档与许可证
+          cp README.md LICENSE CHANGELOG.md ${{ env.OUTPUT_DIR }}/
+          # 生成 ZIP 分发包
+          cd build/output
+          zip -r PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.zip ${{ matrix.suffix }}/
+
+      - name: 上传构建产物到 Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}
+          path: build/output/PascalCoin-${{ env.VERSION }}-${{ matrix.suffix }}.*
+          retention-days: 30
+
+  # 发布到 GitHub Release（仅推送 tag 时执行）
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载所有构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: 生成发布日志
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "RELEASE_VERSION=$VERSION" >> $GITHUB_ENV
+          
+          # 从 CHANGELOG.md 提取对应版本的更新日志
+          if grep -q "## $VERSION" CHANGELOG.md; then
+            awk '/^## '"$VERSION"'/{flag=1; next} /^## /{flag=0} flag' CHANGELOG.md > release_notes.md
+          else
+            echo "## PascalCoin Release v$VERSION" > release_notes.md
+            echo "" >> release_notes.md
+            echo "### 完整更新日志" >> release_notes.md
+            echo "https://github.com/${{ github.repository }}/commits/v$VERSION" >> release_notes.md
+          fi
+
+      - name: 创建 GitHub Release 并上传所有产物
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PascalCoin v${{ env.RELEASE_VERSION }}
+          body_path: release_notes.md
+          files: ./artifacts/**/*.zip ./artifacts/**/*.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
