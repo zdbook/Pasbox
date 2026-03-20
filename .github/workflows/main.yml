@@ -9,8 +9,7 @@ on:
 env:
   REPO_NAME: ${{ github.repository }}
   WORKSPACE: ${{ github.workspace }}
-  # 为GitHub依赖地址自动添加Token，解决克隆认证问题
-  DEPENDENCY_MAIN: "https://${{ secrets.GITHUB_TOKEN }}@github.com/zdbook/Pasbox-Deps.git"
+  DEPENDENCY_MAIN: "https://github.com/zdbook/Pasbox-Deps.git"
   DEPENDENCY_BACKUP1: "https://gitee.com/zdbook/Pasbox-Deps.git"
   DEPENDENCY_BACKUP2: "https://gitlab.com/zdbook/Pasbox-Deps.git"
 jobs:
@@ -65,12 +64,13 @@ jobs:
       - name: 自动获取依赖库 (带容错机制)
         run: |
           echo "正在尝试从主地址获取依赖..."
-          # 临时关闭credential helper，避免GitHub Actions的自动Token影响第三方仓库克隆
-          if git clone -c credential.helper= $DEPENDENCY_MAIN deps; then
+          # 移除GitHub Actions自动添加的全局url替换配置，避免所有https地址都被强制加上Token
+          git config --global --unset url."https://".insteadOf
+          if git clone $DEPENDENCY_MAIN deps; then
             echo "成功从主地址获取依赖。"
-          elif git clone -c credential.helper= $DEPENDENCY_BACKUP1 deps; then
+          elif git clone $DEPENDENCY_BACKUP1 deps; then
             echo "主地址失败，成功从备用地址1获取依赖。"
-          elif git clone -c credential.helper= $DEPENDENCY_BACKUP2 deps; then
+          elif git clone $DEPENDENCY_BACKUP2 deps; then
             echo "备用地址1失败，成功从备用地址2获取依赖。"
           else
             echo "所有地址均失败，请检查网络或仓库地址！" && exit 1
